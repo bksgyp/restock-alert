@@ -2,7 +2,7 @@ name: 두산베어스 의자키링 재입고 알림
 
 on:
   schedule:
-    - cron: "*/10 * * * *"   # 10분마다 (GitHub 사정에 따라 몇 분 늦어질 수 있음)
+    - cron: "*/5 * * * *"    # 5분마다 실행해 스케줄 누락 시에도 10분 이상 비지 않도록 보강
   workflow_dispatch:          # Actions 탭에서 수동 실행 가능
 
 permissions:
