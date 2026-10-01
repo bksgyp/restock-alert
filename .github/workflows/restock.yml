@@ -1,0 +1,62 @@
+name: 두산베어스 의자키링 재입고 알림
+
+on:
+  schedule:
+    - cron: "*/10 * * * *"   # 10분마다 (GitHub 사정에 따라 몇 분 늦어질 수 있음)
+  workflow_dispatch:          # Actions 탭에서 수동 실행 가능
+
+permissions:
+  contents: write             # 상태 파일(state.txt) 커밋용
+
+concurrency:
+  group: restock
+  cancel-in-progress: false
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: 재고 확인
+        env:
+          URL: "https://nolmdshop.com/product/%EB%91%90%EC%82%B0%EB%B2%A0%EC%96%B4%EC%8A%A4-%EC%98%88%EC%95%BD%ED%8C%90%EB%A7%A412%EC%9B%94%EC%A4%91%EC%88%9C%EB%B0%B0%EC%86%A1-%EB%95%A1%ED%81%90%EC%9E%A0%EC%8B%A4-%EC%9D%98%EC%9E%90%ED%82%A4%EB%A7%81/2777/category/179/display/1/"
+          NTFY_TOPIC: "nolmd-restock-04d37fde8923"
+        run: |
+          set -u
+          curl -sSL --max-time 30 -A "Mozilla/5.0" "$URL" -o page.html || true
+
+          if grep -q "is_soldout_icon = 'T'" page.html 2>/dev/null || grep -q '"bSoldout":true' page.html 2>/dev/null; then
+            STATUS=SOLDOUT
+          elif grep -q "is_soldout_icon = 'F'" page.html 2>/dev/null || grep -q '"bSoldout":false' page.html 2>/dev/null; then
+            STATUS=AVAILABLE
+          else
+            STATUS=UNKNOWN
+          fi
+
+          PREV=$(cat state.txt 2>/dev/null || echo SOLDOUT)
+          echo "이전 상태: $PREV / 현재 상태: $STATUS"
+
+          # 확인 실패(UNKNOWN)면 상태를 바꾸지 않고 종료
+          if [ "$STATUS" = "UNKNOWN" ]; then
+            echo "페이지를 확인하지 못했습니다. 다음 실행에서 다시 시도합니다."
+            exit 0
+          fi
+
+          # 품절 → 판매 가능으로 바뀐 순간에만 알림
+          if [ "$STATUS" = "AVAILABLE" ] && [ "$PREV" != "AVAILABLE" ]; then
+            curl -s https://ntfy.sh \
+              -H "Content-Type: application/json; charset=utf-8" \
+              -d "{\"topic\":\"$NTFY_TOPIC\",\"title\":\"재입고! 두산베어스 의자키링\",\"message\":\"땡큐잠실 의자키링이 판매 가능 상태로 바뀌었습니다. 지금 구매하세요!\",\"priority\":5,\"tags\":[\"tada\"],\"click\":\"https://nolmdshop.com/product/detail.html?product_no=2777\"}"
+            echo "알림 전송 완료"
+          fi
+
+          # 상태가 바뀌었으면 저장 (다시 품절되면 다음 재입고 때 또 알림)
+          if [ "$STATUS" != "$PREV" ]; then
+            echo "$STATUS" > state.txt
+            git config user.name "github-actions[bot]"
+            git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+            git add state.txt
+            git commit -m "상태 변경: $PREV -> $STATUS"
+            git push
+          fi
